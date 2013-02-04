@@ -2,7 +2,7 @@
 #
 #  Вычисление выходных и рабочих дней при графике работы 2/2
 #  (Отсчёт ведётся с 1 февраля 2013 г. - выходной день)
-#  Version 1.0
+#  Version 1.1
 #
 #  Copyright 2013 Konstantin Zyryanov <post.herzog@gmail.com>
 #  
@@ -26,7 +26,8 @@
 
 #Функция вывода краткого списка возможных параметров
 usage() {
-echo "Использование: $0 [[-d|--date] ДАТА] [-c|--calendar] [-h|--help]";
+echo "$0 [ [-d|--date [ДАТА]] | [-c|--calendar [МЕСЯЦ]] ] [-h|--help]";
+echo;
 exit;
 }
 
@@ -34,16 +35,67 @@ exit;
 help() {
 echo;
 echo "Использование: "
-echo "$0 [[-d|--date] ДАТА] [-c|--calendar [МЕСЯЦ]] [-h|--help]";
+echo "$0 [ [-d|--date [ДАТА]] | [-c|--calendar [МЕСЯЦ]] ] [-h|--help]";
 echo;
-echo "  [-d|--date] ДАТА		Вывод результата на определённую пользователем";
-echo "				ДАТУ, заданную в формате ДД.ММ.ГГ";
+echo "  -d|--date [ДАТА]		Вывод результата на определённую пользователем";
+echo "				ДАТУ, заданную в формате ДД.ММ.ГГ.";
+echo "				При указании параметра с неполной датой или";
+echo "				без даты - подставляется текущее значение";
+echo "				из календаря системы.";
 echo;
 echo "  -c|--calendar [МЕСЯЦ]		Вывод результата в виде календаря";
 echo "				на определённый пользователем МЕСЯЦ,";
-echo "				заданный в формате ММ или ММ.ГГ"
+echo "				заданный в формате ММ или ММ.ГГ."
+echo "				Если не указаны определённый месяц или год -";
+echo "				подставляется текущее значение";
+echo "				из календаря системы.";
 echo;
-echo "  -h|--help			Показать эту справку и выйти";
+echo "  -h|--help			Показать эту справку и выйти.";
+echo;
+exit;
+}
+
+#Функция просчёта и вывода графика для заданного месяца в виде календаря
+calendar() {
+data=$1;
+month_begin_with=`date --date="@$data" +%u`;
+case `date --date="@$data" +%m` in
+	( 01 | 03 | 05 | 07 | 08 | 10 | 12 )
+		month_last_day=31;;
+	( 04 | 06 | 09 | 11 )
+		month_last_day=30;;
+	( 02 )
+		if [ $((`date --date="@$data" +%Y`%4)) != 0 ]; then
+			month_last_day=28;
+		else
+			month_last_day=29;
+		fi;;
+esac;
+echo;
+echo "`date --date=\"@$data\" \"+%B %Y%n\"`:"
+while [ $month_last_day -gt 0 ]; do
+	for (( j=0; j<7; j++ )); do
+		if [ $month_begin_with -gt 1 ]; then
+			echo -ne "\t";
+			month_begin_with=$(($month_begin_with-1));
+			continue;
+		fi;
+		if [ $month_last_day -eq 0 ]; then
+			break;
+		fi;
+		difference=$(($data-1359655200));
+		difference=$(($difference/86400+1));
+		result="р";
+		for (( k=0; $k<$difference; k=$k+2 )); do
+			if [ "$result" = "в" ]; then result="р"; continue; fi;
+			if [ "$result" = "р" ]; then result="в"; continue; fi;
+		done;
+		echo -ne "`date --date=\"@$data\" +%d`$result\t";
+		data=$(($data+86400));
+		month_last_day=$(($month_last_day-1));
+	done;
+	echo;
+done;
 echo;
 exit;
 }
@@ -55,36 +107,82 @@ if [ $pos_param != 0 ]; then
 	case $param in
 		( -d | --date )
 			shift;
-			#if [ "${#$1}" -lt 8 ]; then
-			day="${$1:0:2}";
-			month="${$1:3:2}";
-			year="${$1:6:2}";
-			#if 
+			param=$1;
+			if [ "${#param}" -eq 8 ]; then
+				day="${param:0:2}";
+				month="${param:3:2}";
+				year="${param:6:2}";
+			elif [ "${#param}" -eq 5 ]; then
+				day="${param:0:2}";
+				month="${param:3:2}";
+				year=`date +%Y`;
+			elif [ "${#param}" -eq 2 ]; then
+				day=$param;
+				month=`date +%m`;
+				year=`date +%Y`;
+			else
+				day=`date +%d`;
+				month=`date +%m`;
+				year=`date +%Y`;
+			fi;
+			data=`date --date="$year-$month-$day" +%s`;;
 		( -c | --calendar )
-			calendar=1;
 			shift;
-			if [ -n "$1" ]; then calendar_month=$1; fi;;
+			param=$1;
+			if [ "${#param}" -eq 5 ]; then
+				calendar_month="${param:0:2}";
+				calendar_year="${param:3:2}";
+			elif [ "${#param}" -eq 2 ]; then
+				calendar_month=$param;
+				calendar_year=`date +%Y`;
+			else
+				calendar_month=`date +%m`;
+				calendar_year=`date +%Y`;
+			fi;
+			data=`date --date="$calendar_year-$calendar_month-01" +%s`;
+			calendar $data;;
 		( -h | --help)
 			help;;
 		( * )
-			
+			usage;;
 	esac;
 fi;
 
-echo -n "Введите дату [ДД.ММ.ГГ]: ";
-read data;
-day="${data:0:2}";
-month="${data:3:2}";
-year=20"${data:6:2}";
-data=`date --date="$year-$month-$day" +%s`;
+#Просчёт результата и вывод для одиночной даты
+
+#Запрос даты, если не было задано соответствующего параметра
+if [ -z $data ]; then
+	echo -n "Введите дату [ДД.ММ.ГГ]: ";
+	read data;
+	if [ -n "$data" ]; then
+		day="${data:0:2}";
+		month="${data:3:2}";
+		year=20"${data:6:2}";
+	else
+		echo;
+		echo "Не указано что-либо определённое - будет выведен результат для текущей даты";
+		day=`date +%d`;
+		month=`date +%m`;
+		year=`date +%Y`;
+	fi;
+	data=`date --date="$year-$month-$day" +%s`;
+fi;
+#Вычисление перебором от 1 февраля 2013 г. по суткам
 difference=$(($data-1359655200));
 difference=$(($difference/86400+1));
-result=1;
+result="р";
 for (( i=0; $i<$difference; i=$i+2 )); do
-	if [ $result -eq 0 ]; then result=1; continue; fi;
-	if [ $result -eq 1 ]; then result=0; continue; fi;
+	if [ "$result" = "в" ]; then result="р"; continue; fi;
+	if [ "$result" = "р" ]; then result="в"; continue; fi;
 done;
+#Вывод результата
+echo;
+date --date="@$data" "+%d %B %Y %n%A%n";
 case $result in
-	0 ) echo "Выходной";;
-	1 ) echo "Рабочий";;
+	( "в" )
+		echo "Выходной";;
+	( "р" )
+		echo "Рабочий";;
 esac;
+echo;
+exit;
